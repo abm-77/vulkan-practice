@@ -25,3 +25,12 @@ pub fn read_shader_code(shader_path: &Path) -> Vec<u8> {
 
 	byte_code
 }
+
+pub fn clamp<T: PartialOrd<T>>(input: T, min: T, max: T) -> T {
+	if input > max {
+		return max;
+	} else if input < min {
+		return min;
+	}
+	return max;
+}

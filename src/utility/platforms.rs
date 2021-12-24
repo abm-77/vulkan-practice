@@ -28,7 +28,7 @@ pub fn required_extension_names() -> Vec<*const i8> {
 	vec! [
 		Surface::name().as_ptr(),
 		MacOSSurface::name().as_ptr(),
-		DebugUtils::name().as_ptr,
+		DebugUtils::name().as_ptr(),
 	]
 }
 
@@ -46,12 +46,11 @@ pub fn required_extension_names() -> Vec<*const i8> {
 	vec! [
 		Surface::name().as_ptr(),
 		XlibSurface::name().as_ptr(),
-		DebugUtils::name().as_ptr,
+		DebugUtils::name().as_ptr(),
 	]
 }
 
 // -------------------------------------------------
-
 
 #[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
 pub unsafe fn create_surface (
@@ -84,9 +83,9 @@ pub unsafe fn create_surface (
 	use std::mem;
 	use std::os::raw::c_void;
 	use std::ptr;
-	use winit::platform::macos::WindowExtMacoS;
+	use winit::platform::macos::WindowExtMacOS;
 
-	let wnd: cocoa_id = mem::transmute(window.ns_window);
+	let wnd: cocoa_id = mem::transmute(window.ns_window());
 	
 	let layer = CoreAnimationLayer::new();
 
@@ -101,14 +100,14 @@ pub unsafe fn create_surface (
 	view.setWantsLayer(YES);
 
 	let create_info = vk::MacOSSurfaceCreateInfoMVK {
-		s_type: vk::StructureType::MACOS_SRUFACE_CREATE_INFO_M,
+		s_type: vk::StructureType::MACOS_SURFACE_CREATE_INFO_MVK,
 		p_next: ptr::null(),
 		flags: Default::default(),
 		p_view: window.ns_view() as *const c_void,
 	};
 
 	let macos_surface_loader = MacOSSurface::new(entry, instance);
-	macos_surface_loader.create_mac_os_surface_mvk(&create_info, None)
+	macos_surface_loader.create_mac_os_surface(&create_info, None)
 }
 
 #[cfg(target_os = "windows")]
