@@ -7,6 +7,8 @@ pub struct DeviceExtension {
 pub struct SurfaceInfo {
 	pub surface_loader: ash::extensions::khr::Surface,
 	pub surface: vk::SurfaceKHR,
+	pub surface_width: u32,
+	pub surface_height: u32,
 
 }
 

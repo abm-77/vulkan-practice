@@ -88,7 +88,9 @@ pub fn create_instance (
 pub fn create_surface (
 	entry: &ash::Entry,
 	instance: &ash::Instance,
-	window: &winit::window::Window
+	window: &winit::window::Window,
+	surface_width: u32,
+	surface_height: u32,
 ) -> SurfaceInfo {
 	let surface = unsafe {
 		platforms::create_surface(entry, instance, window)
@@ -100,10 +102,16 @@ pub fn create_surface (
 	SurfaceInfo {
 		surface_loader,
 		surface,
+		surface_width,
+		surface_height,
 	}
 }
 
-pub fn pick_physical_device(instance: &ash::Instance, surface_info: &SurfaceInfo) -> vk::PhysicalDevice {
+pub fn pick_physical_device(
+	instance: &ash::Instance, 
+	surface_info: &SurfaceInfo,
+	required_device_extensions: &DeviceExtension,
+) -> vk::PhysicalDevice {
 	let physical_devices = unsafe {
 		instance
 			.enumerate_physical_devices()
@@ -111,11 +119,11 @@ pub fn pick_physical_device(instance: &ash::Instance, surface_info: &SurfaceInfo
 	};
 
 	let result = physical_devices.iter().find(|physical_device| {
-		is_physical_device_suitable(instance, **physical_device, surface_info)
+		is_physical_device_suitable(instance, **physical_device, surface_info, required_device_extensions)
 	});
 
 	match result {
-		Some(physical_device) => *physical_device,
+		Some(p_physical_device) => *p_physical_device,
 		None => panic!("Failed to find a suitable GPU!"),
 	}
 }
@@ -124,6 +132,7 @@ pub fn is_physical_device_suitable (
 	instance: &ash::Instance, 
 	physical_device: vk::PhysicalDevice,
 	surface_info: &SurfaceInfo,
+	required_device_extensions: &DeviceExtension,
 ) -> bool {
 	let _device_properties = unsafe { instance.get_physical_device_properties(physical_device) };
 	let _device_features = unsafe { instance.get_physical_device_features(physical_device) };
@@ -131,7 +140,7 @@ pub fn is_physical_device_suitable (
 
 	let is_queue_family_supported= indices.is_complete();
 	let is_device_extension_supported = 
-		check_device_extension_support(instance, physical_device);
+		check_device_extension_support(instance, physical_device, required_device_extensions);
 	let is_swapchain_supported= if is_device_extension_supported {
 		let swapchain_support = query_swapchain_support(physical_device, surface_info);
 		!swapchain_support.formats.is_empty() && !swapchain_support.present_modes.is_empty()
@@ -184,6 +193,7 @@ pub fn find_queue_family(
 pub fn check_device_extension_support(
 	instance: &ash::Instance,
 	physical_device: vk::PhysicalDevice,
+	device_extensions: &DeviceExtension,
 ) -> bool {
 	let available_extensions = unsafe {
 		instance
@@ -201,7 +211,7 @@ pub fn check_device_extension_support(
 	}
 
 	let mut required_extensions = std::collections::HashSet::new();
-	for extension in DEVICE_EXTENSIONS.names.iter() {
+	for extension in device_extensions.names.iter() {
 		required_extensions.insert(extension.to_string());
 	}
 

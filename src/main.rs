@@ -7,6 +7,7 @@ use vulkan_tutorial::{
 	}
 };
 
+use winapi::um::winnt::DEVICEFAMILYINFOENUM_XBOX;
 use winit::{
     event::{Event, WindowEvent, KeyboardInput, VirtualKeyCode, ElementState},
     event_loop::{ControlFlow, EventLoop},
@@ -64,7 +65,7 @@ struct VulkanApp {
 impl VulkanApp {
 	pub fn new(event_loop: &winit::event_loop::EventLoop<()>) -> VulkanApp {
 		// window
-		let window = utility::window::init_window(&event_loop, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
+		let window = utility::window::init_window(event_loop, WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT);
 
 		// init vulkan 
 	 	let entry = ash::Entry::new();
@@ -80,10 +81,10 @@ impl VulkanApp {
 			utility::debug::setup_debug_utils(VALIDATION.is_enable, &entry, &instance);
 		
 		// surface information
-		let surface_info = share::create_surface(&entry, &instance, &window);
+		let surface_info = share::create_surface(&entry, &instance, &window, WINDOW_WIDTH, WINDOW_HEIGHT);
 
 		// get physical device
-		let physical_device = share::pick_physical_device(&instance, &surface_info);
+		let physical_device = share::pick_physical_device(&instance, &surface_info, &DEVICE_EXTENSIONS);
 
 		// get logical device
 		let (logical_device, family_indices) = share::create_logical_device(
@@ -208,7 +209,7 @@ impl VulkanApp {
 			wait_semaphore_count: wait_semaphores.len() as u32,
 			p_wait_semaphores: wait_semaphores.as_ptr(),
 			p_wait_dst_stage_mask: wait_stages.as_ptr(),
-			command_buffer_count: self.command_buffers.len() as u32,
+			command_buffer_count: 1,
 			p_command_buffers: &self.command_buffers[image_index as usize],
 			signal_semaphore_count: signal_semaphores.len() as u32,
 			p_signal_semaphores: signal_semaphores.as_ptr(),
@@ -280,6 +281,12 @@ impl VulkanApp {
 				Event::RedrawRequested(_window_id) => {
 					self.draw_frame();
 				},
+				Event::LoopDestroyed => {
+                    unsafe {
+                        self.device.device_wait_idle()
+                            .expect("Failed to wait device idle!")
+                    };
+                },
 				_ => (),
 			}
 		});

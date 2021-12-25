@@ -449,7 +449,7 @@ pub fn create_sync_objects(device: &ash::Device, max_frame_in_flight: usize) -> 
 	let fence_create_info = vk::FenceCreateInfo {
 		s_type: vk::StructureType::FENCE_CREATE_INFO,
 		p_next: ptr::null(),
-		flags: vk::FenceCreateFlags::empty(),
+		flags: vk::FenceCreateFlags::SIGNALED,
 	};
 
 	for _ in 0..max_frame_in_flight {
