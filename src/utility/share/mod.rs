@@ -1,3 +1,5 @@
+pub mod v1;
+
 use ash::{Entry, Instance, Device, vk};
 
 use std::{
@@ -364,6 +366,7 @@ pub fn create_logical_device(
 	instance: &ash::Instance,
 	physical_device: vk::PhysicalDevice,
 	validation: &debug::ValidationInfo,
+	device_extensions: &DeviceExtension,
 	surface_info: &SurfaceInfo,
 ) -> (ash::Device, QueueFamilyIndices) {
 	let indices = find_queue_family(instance, physical_device, surface_info);
@@ -401,9 +404,7 @@ pub fn create_logical_device(
 		.map(|layer_name| layer_name.as_ptr())
 		.collect();
 	
-	let enable_extension_names = [
-		ash::extensions::khr::Swapchain::name().as_ptr(), // enable Swapchain
-	];
+	let enable_extension_names = device_extensions.get_extensions_raw_names();
 
 	let device_create_info = vk::DeviceCreateInfo {
 		s_type: vk::StructureType::DEVICE_CREATE_INFO,
@@ -434,7 +435,7 @@ pub fn create_logical_device(
 
 	(logical_device, indices)
 }
-fn create_image_views(
+pub fn create_image_views(
 	device: &ash::Device,
 	surface_format: vk::Format,
 	images: &Vec<vk::Image>
@@ -472,4 +473,20 @@ fn create_image_views(
 		swapchain_imageviews.push(imageview);
 	}
 	swapchain_imageviews
+}
+
+pub fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderModule {
+	let shader_module_create_info = vk::ShaderModuleCreateInfo {
+		s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
+		p_next: ptr::null(),
+		flags: vk::ShaderModuleCreateFlags::empty(),
+		code_size: code.len(),
+		p_code: code.as_ptr() as *const u32,
+	};
+
+	unsafe {
+		device
+			.create_shader_module(&shader_module_create_info, None)
+			.expect("Failed to create Shader Module!")
+	}
 }

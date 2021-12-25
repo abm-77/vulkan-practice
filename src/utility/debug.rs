@@ -100,7 +100,7 @@ pub fn populate_debug_messenger_create_info() -> vk::DebugUtilsMessengerCreateIn
 			vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE 	|
 			vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
 		message_type: 
-			vk::DebugUtilsMessageTypeFlagsEXT::GENERAL 		|
+			//vk::DebugUtilsMessageTypeFlagsEXT::GENERAL 		|
 			vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE 	|
 			vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
 		pfn_user_callback: Some(vulkan_debug_utils_callback),
