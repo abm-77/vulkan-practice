@@ -7,7 +7,6 @@ use vulkan_tutorial::{
 	}
 };
 
-use winapi::um::winnt::DEVICEFAMILYINFOENUM_XBOX;
 use winit::{
     event::{Event, WindowEvent, KeyboardInput, VirtualKeyCode, ElementState},
     event_loop::{ControlFlow, EventLoop},
