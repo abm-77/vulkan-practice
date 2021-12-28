@@ -1,6 +1,7 @@
 pub mod v1;
 
 use ash::{Entry, Instance, Device, vk};
+use winapi::um::cfgmgr32::CM_DELETE_CLASS_ONLY;
 
 use std::{
 	ffi::CString, 
@@ -102,8 +103,8 @@ pub fn create_surface (
 	SurfaceInfo {
 		surface_loader,
 		surface,
-		surface_width,
-		surface_height,
+		screen_width: surface_width,
+		screen_height: surface_height,
 	}
 }
 
@@ -252,6 +253,7 @@ pub fn create_swapchain(
 	instance: &ash::Instance,
 	device: &ash::Device,
 	physical_device: vk::PhysicalDevice,
+	window: &winit::window::Window,
 	surface_info: &SurfaceInfo,
 	queue_family: &QueueFamilyIndices,
 ) -> SwapChainInfo {
@@ -259,7 +261,7 @@ pub fn create_swapchain(
 
 	let surface_format = choose_swapchain_format(&swapchain_support.formats);
 	let present_mode = choose_swapchain_present_mode(&swapchain_support.present_modes);
-	let extent = choose_swapchain_extent(&swapchain_support.capabilities);
+	let extent = choose_swapchain_extent(&swapchain_support.capabilities, window);
 
 	let image_count = swapchain_support.capabilities.min_image_count + 1;
 	let image_count = if swapchain_support.capabilities.max_image_count > 0 {
@@ -351,20 +353,25 @@ pub fn choose_swapchain_present_mode(
 	vk::PresentModeKHR::FIFO
 }
 
-pub fn choose_swapchain_extent(capabilities: &vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
+pub fn choose_swapchain_extent(
+	capabilities: &vk::SurfaceCapabilitiesKHR,
+	window: &winit::window::Window,
+) -> vk::Extent2D {
 	if capabilities.current_extent.width != u32::MAX {
 		capabilities.current_extent
 	} else {
 		use tools::clamp;
 		
+		let window_size = window.inner_size();
+
 		vk::Extent2D {
 			width: clamp(
-				WINDOW_WIDTH,
+				window_size.width,
 				capabilities.min_image_extent.width,
 				capabilities.max_image_extent.width,
 			),
 			height: clamp(
-				WINDOW_HEIGHT,
+				window_size.height,
 				capabilities.min_image_extent.height,
 				capabilities.max_image_extent.height,
 			),
@@ -498,5 +505,172 @@ pub fn create_shader_module(device: &ash::Device, code: Vec<u8>) -> vk::ShaderMo
 		device
 			.create_shader_module(&shader_module_create_info, None)
 			.expect("Failed to create Shader Module!")
+	}
+}
+
+pub fn find_memory_type(
+	type_filter: u32,
+	required_properties: vk::MemoryPropertyFlags,
+	mem_properties: &vk::PhysicalDeviceMemoryProperties,
+) -> u32 {
+	for (i, memory_type) in mem_properties.memory_types.iter().enumerate() {
+		if (type_filter & (1 << i)) > 0 &&
+			memory_type.property_flags.contains(required_properties){
+			return i as u32;
+		}
+	}
+
+	panic!("Failed to find suitable memory type!")
+}
+
+pub fn create_buffer(
+	device: &ash::Device,
+	size: vk::DeviceSize,
+	usage: vk::BufferUsageFlags,
+	required_memory_properties: vk::MemoryPropertyFlags,
+	device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+) -> (vk::Buffer, vk::DeviceMemory) {
+	let buffer_create_info = vk::BufferCreateInfo {
+		s_type: vk::StructureType::BUFFER_CREATE_INFO,
+		p_next: ptr::null(),
+		flags: vk::BufferCreateFlags::empty(),
+		size: size,
+		usage: usage,
+		sharing_mode: vk::SharingMode::EXCLUSIVE,
+		queue_family_index_count: 0,
+		p_queue_family_indices: ptr::null(),
+
+	};
+
+	let buffer = unsafe {
+		device
+			.create_buffer(&buffer_create_info, None)
+			.expect("Could not create Vertex Buffer!")
+	};
+
+	let mem_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+	let memory_type = find_memory_type(
+		mem_requirements.memory_type_bits,
+		required_memory_properties,
+		device_memory_properties,
+	);
+
+	let allocate_info = vk::MemoryAllocateInfo {
+		s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
+		p_next: ptr::null(),
+		allocation_size: mem_requirements.size,
+		memory_type_index: memory_type,
+	};
+
+	let buffer_memory = unsafe {
+		device
+			.allocate_memory(&allocate_info, None)
+			.expect("Failed to allocate Vertex Buffer memory!")
+	};
+
+	unsafe {
+		device
+			.bind_buffer_memory(buffer, buffer_memory, 0)
+			.expect("Failed to bind buffer!");
+	}
+
+	(buffer, buffer_memory)
+}
+
+fn copy_buffer(
+	device: &ash::Device,
+	submit_queue: vk::Queue,
+	command_pool: vk::CommandPool,
+	src_buffer: vk::Buffer,
+	dst_buffer: vk::Buffer,
+	size: vk::DeviceSize,
+
+) {
+	let command_buffer = begin_single_time_command(device, command_pool);
+	let copy_regions = [vk::BufferCopy {
+		src_offset: 0,
+		dst_offset: 0,
+		size,
+	}];
+
+	unsafe {
+		device.cmd_copy_buffer(command_buffer, src_buffer, dst_buffer, &copy_regions);
+	}
+
+	end_single_time_command(device, command_pool, submit_queue, command_buffer);
+
+}
+
+pub fn begin_single_time_command(
+	device: &ash::Device,
+	command_pool: vk::CommandPool,
+) -> vk::CommandBuffer {
+	let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
+		s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+		p_next: ptr::null(),
+		command_buffer_count: 1,
+		command_pool,
+		level: vk::CommandBufferLevel::PRIMARY,
+	};
+
+	let command_buffer = unsafe {
+		device
+			.allocate_command_buffers(&command_buffer_allocate_info)
+			.expect("Failed to allocate Command Bufer!")
+	}[0];
+
+	let begin_info = vk::CommandBufferBeginInfo {
+		s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
+		p_next: ptr::null(),
+		flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+		p_inheritance_info: ptr::null(),
+	};
+
+	unsafe {
+		device
+			.begin_command_buffer(command_buffer, &begin_info)
+			.expect("Failed to begin Command Buffer!");
+	}
+
+	command_buffer
+}
+
+pub fn end_single_time_command(
+	device: &ash::Device,
+	command_pool: vk::CommandPool,
+	submit_queue: vk::Queue,
+	command_buffer: vk::CommandBuffer,
+) {
+
+	unsafe {
+		device
+			.end_command_buffer(command_buffer)
+			.expect("Could not end Command Buffer!");
+	}
+
+	let buffers_to_submit = [command_buffer];
+
+	let submit_info = [vk::SubmitInfo {
+		s_type: vk::StructureType::SUBMIT_INFO,
+		p_next: ptr::null(),
+		wait_semaphore_count: 0,
+		p_wait_semaphores: ptr::null(),
+		p_wait_dst_stage_mask: ptr::null(),
+		command_buffer_count: 1,
+		p_command_buffers: &command_buffer,
+		signal_semaphore_count: 0,
+		p_signal_semaphores: ptr::null(),
+	}];
+
+
+	unsafe {
+		device
+			.queue_submit(submit_queue, &submit_info, vk::Fence::null())
+			.expect("Failed to Submit Queue.");
+		device
+			.queue_wait_idle(submit_queue)
+			.expect("Failed to wait Queue idle");
+
+		device.free_command_buffers(command_pool, &buffers_to_submit);
 	}
 }

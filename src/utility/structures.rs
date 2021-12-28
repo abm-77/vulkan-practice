@@ -1,5 +1,9 @@
 use ash::vk;
 
+use cgmath::{
+	Matrix4,
+};
+
 pub struct DeviceExtension {
 	pub names: [&'static str; 1],
 }
@@ -7,9 +11,8 @@ pub struct DeviceExtension {
 pub struct SurfaceInfo {
 	pub surface_loader: ash::extensions::khr::Surface,
 	pub surface: vk::SurfaceKHR,
-	pub surface_width: u32,
-	pub surface_height: u32,
-
+	pub screen_width: u32,
+	pub screen_height: u32,
 }
 
 pub struct SwapChainInfo {
@@ -49,3 +52,65 @@ pub struct SyncObjects {
 	pub render_finished_semaphores: Vec<vk::Semaphore>,
 	pub in_flight_fences: Vec<vk::Fence>,
 }
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct Vertex {
+	pub pos: [f32; 3],
+	pub color: [f32; 4],
+}
+
+impl Vertex {
+	pub fn get_binding_descriptions() -> [vk::VertexInputBindingDescription; 1] {
+		[vk::VertexInputBindingDescription {
+			binding: 0,
+			stride: std::mem::size_of::<Self>() as u32,
+			input_rate: vk::VertexInputRate::VERTEX,
+		}]
+	}
+
+	pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 2] {
+		[
+		vk::VertexInputAttributeDescription {
+			binding: 0,
+			location: 0,
+			format: vk::Format::R32G32B32_SFLOAT,
+			offset: 0,
+		},
+		vk::VertexInputAttributeDescription {
+			binding: 0,
+			location: 1,
+			format: vk::Format::R32G32B32A32_SFLOAT,
+			offset: std::mem::size_of::<[f32; 3]>() as u32,
+		},
+		]
+	}
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, Copy)]
+pub struct UniformBufferObject {
+	pub model: Matrix4<f32>,
+	pub view: Matrix4<f32>,
+	pub proj: Matrix4<f32>,
+}
+
+pub const RECT_VERTICES_DATA: [Vertex; 4] = [
+    Vertex {
+        pos: [-0.5, -0.5, 0.0],
+        color: [1.0, 0.0, 0.0, 1.0],
+    },
+    Vertex {
+        pos: [0.5, -0.5, 0.0],
+        color: [0.0, 1.0, 0.0, 1.0],
+    },
+    Vertex {
+        pos: [0.5, 0.5, 0.0],
+        color: [0.0, 0.0, 1.0, 1.0],
+    },
+    Vertex {
+        pos: [-0.5, 0.5, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+    },
+];
+pub const RECT_INDICES_DATA: [u32; 6] = [0, 1, 2, 2, 3, 0];

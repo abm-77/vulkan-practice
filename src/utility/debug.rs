@@ -28,6 +28,8 @@ unsafe extern "system" fn vulkan_debug_utils_callback (
 
 	let message = CStr::from_ptr((*p_callback_data).p_message);
 	println!("[Debug]{}{}{:?}", severity, types, message);
+	println!();
+	println!();
 
 	vk::FALSE
 }

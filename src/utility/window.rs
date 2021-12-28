@@ -19,7 +19,7 @@ pub fn init_window (
 		.expect("Failed to create window!")
 }
 
-pub trait _VulkanApp {
+pub trait VulkanApp {
 	fn draw_frame(&mut self, delta_time: f32);
 	fn recreate_swapchain(&mut self);
 	fn cleanup_swapchain(&mut self);
@@ -39,7 +39,7 @@ impl ProgramProc {
 		ProgramProc {event_loop}
 	}
 
-	pub fn main_lop<A: 'static + _VulkanApp>(self, mut vulkan_app: A) {
+	pub fn main_loop<A: 'static + VulkanApp>(self, mut vulkan_app: A) {
 		let mut tick_counter = super::fps_limiter::FPSLimiter::new();
 
 		self.event_loop.run(move |event, _, control_flow| {
@@ -55,7 +55,6 @@ impl ProgramProc {
 								KeyboardInput { virtual_keycode, state, .. } => {
 									match (virtual_keycode, state) {
 										(Some(VirtualKeyCode::Escape), ElementState::Pressed) => {
-											dbg!();
 											vulkan_app.wait_device_idle();
 											*control_flow = ControlFlow::Exit
 										},

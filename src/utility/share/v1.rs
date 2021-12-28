@@ -1,4 +1,5 @@
-use ash::vk::{self, QueryPoolCreateFlags};
+use ash::vk::{self};
+
 
 use std::{
 	cmp::max,
@@ -77,11 +78,12 @@ pub fn create_graphics_pipeline(
 	device: &ash::Device, 
 	render_pass: vk::RenderPass,
 	swapchain_extent: vk::Extent2D,
+	ubo_set_layout: vk::DescriptorSetLayout,
 )  -> (vk::Pipeline, vk::PipelineLayout) {
 	let vert_shader_code =
-		tools::read_shader_code(Path::new("shaders/spv/shader-base.vert.spv"));
+		tools::read_shader_code(Path::new("shaders/spv/shader-uniform-buffer.vert.spv"));
 	let frag_shader_code =
-		tools::read_shader_code(Path::new("shaders/spv/shader-base.frag.spv"));
+		tools::read_shader_code(Path::new("shaders/spv/shader-uniform-buffer.frag.spv"));
 
 	let vert_shader_module = create_shader_module(device, vert_shader_code);
 	let frag_shader_module = create_shader_module(device, frag_shader_code);
@@ -111,14 +113,17 @@ pub fn create_graphics_pipeline(
 		},
 	];
 
+	let binding_description = Vertex::get_binding_descriptions();
+	let attribute_description = Vertex::get_attribute_descriptions();
+
 	let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
 		s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 		p_next: ptr::null(),
 		flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-		vertex_attribute_description_count: 0,
-		p_vertex_attribute_descriptions: ptr::null(),
-		vertex_binding_description_count: 0,
-		p_vertex_binding_descriptions: ptr::null(),
+		vertex_attribute_description_count: attribute_description.len() as u32,
+		p_vertex_attribute_descriptions: attribute_description.as_ptr(),
+		vertex_binding_description_count: binding_description.len() as u32,
+		p_vertex_binding_descriptions: binding_description.as_ptr(),
 	};
 
 	let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
@@ -232,21 +237,14 @@ pub fn create_graphics_pipeline(
 		blend_constants: [0.0, 0.0, 0.0, 0.0],
 	};
 
-	// let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-	// let dynamic_state_info = vk::PipelineDynamicStateCreateInfo {
-	// 	s_type: vk::StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-	// 	p_next: ptr::null(),
-	// 	flags: vk::PipelineDynamicStateCreateFlags::empty(),
-	// 	dynamic_state_count: dynamic_states.len() as u32,
-	// 	p_dynamic_states: dynamic_states.as_ptr(),
-	// };
+	let set_layouts = [ubo_set_layout];
 
 	let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
 		s_type: vk::StructureType::PIPELINE_LAYOUT_CREATE_INFO,
 		p_next: ptr::null(),
 		flags: vk::PipelineLayoutCreateFlags::empty(),
-		set_layout_count: 0,
-		p_set_layouts: ptr::null(),
+		set_layout_count: set_layouts.len() as u32,
+		p_set_layouts: set_layouts.as_ptr(),
 		push_constant_range_count: 0,
 		p_push_constant_ranges: ptr::null(),
 	};
@@ -357,6 +355,10 @@ pub fn create_command_buffers(
 	framebuffers: &Vec<vk::Framebuffer>,
 	render_pass: vk::RenderPass,
 	surface_extent: vk::Extent2D,
+	vertex_buffer: vk::Buffer,
+	index_buffer: vk::Buffer,
+	pipeline_layout: vk::PipelineLayout,
+	descriptor_sets: &Vec<vk::DescriptorSet>,
 ) -> Vec<vk::CommandBuffer> {
 	let command_buffer_allocate_info = vk::CommandBufferAllocateInfo {
 		s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
@@ -397,12 +399,12 @@ pub fn create_command_buffers(
             p_next: ptr::null(),
             render_pass: render_pass,
             framebuffer: framebuffers[i],
+            clear_value_count: clear_values.len() as u32,
+            p_clear_values: clear_values.as_ptr(),
             render_area: vk::Rect2D {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: surface_extent,
             },
-            clear_value_count: clear_values.len() as u32,
-            p_clear_values: clear_values.as_ptr(),
         };
 
 		unsafe {
@@ -418,7 +420,22 @@ pub fn create_command_buffers(
 				graphics_pipeline,
 			);
 
-			device.cmd_draw(command_buffer, 3, 1, 0, 0);
+			let vertex_buffers = [vertex_buffer];
+			let offsets = [0_u64];
+			let descriptor_sets_to_bind = [descriptor_sets[i]];
+
+			device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+			device.cmd_bind_index_buffer(command_buffer, index_buffer, 0, vk::IndexType::UINT32);
+			device.cmd_bind_descriptor_sets(
+			 	command_buffer, 
+				vk::PipelineBindPoint::GRAPHICS, 
+				pipeline_layout, 
+				0, 
+				&descriptor_sets_to_bind, 
+				&[]
+			);
+
+			device.cmd_draw_indexed(command_buffer, RECT_INDICES_DATA.len() as u32, 1, 0, 0, 0);
 
 			device.cmd_end_render_pass(command_buffer);
 
@@ -438,7 +455,6 @@ pub fn create_sync_objects(device: &ash::Device, max_frame_in_flight: usize) -> 
 		render_finished_semaphores: vec![],
 		in_flight_fences: vec![],
 	};
-
 
 	let semaphore_create_info = vk::SemaphoreCreateInfo {
 		s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
@@ -472,6 +488,117 @@ pub fn create_sync_objects(device: &ash::Device, max_frame_in_flight: usize) -> 
 	}
 
 	sync_objects
-
-
 }
+
+pub fn create_vertex_buffer<T>(
+	device: &ash::Device,
+	device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+	command_pool: vk::CommandPool,
+	submit_queue: vk::Queue,
+	data: &[T],
+) -> (vk::Buffer, vk::DeviceMemory) {
+	let buffer_size = std::mem::size_of_val(data) as vk::DeviceSize;
+
+	let (staging_buffer, staging_buffer_memory) = create_buffer(
+		device,
+		buffer_size,
+		vk::BufferUsageFlags::TRANSFER_SRC,
+		vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+		&device_memory_properties,
+	);	
+
+	unsafe {
+		let data_ptr = device
+			.map_memory(
+				staging_buffer_memory, 
+				0, 
+				buffer_size, 
+				vk::MemoryMapFlags::empty()
+			)
+			.expect("Failed to Map Memory") as *mut T;
+
+		data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
+		device.unmap_memory(staging_buffer_memory);
+	}
+
+		let (vertex_buffer, vertex_buffer_memory) = create_buffer(
+			device,
+			buffer_size,
+			vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::VERTEX_BUFFER,
+			vk::MemoryPropertyFlags::DEVICE_LOCAL,
+			&device_memory_properties,
+		);
+
+		copy_buffer(
+			device,
+			submit_queue,
+			command_pool,
+			staging_buffer,
+			vertex_buffer,
+			buffer_size,
+		);
+
+		unsafe {
+			device.destroy_buffer(staging_buffer, None);
+			device.free_memory(staging_buffer_memory, None);
+		}
+
+		(vertex_buffer, vertex_buffer_memory)
+}
+
+pub fn create_index_buffer(
+	device: &ash::Device,
+	device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+	command_pool: vk::CommandPool,
+	submit_queue: vk::Queue,
+	data: &[u32],
+) -> (vk::Buffer, vk::DeviceMemory) {
+	let buffer_size = std::mem::size_of_val(data) as vk::DeviceSize;
+
+	let (staging_buffer, staging_buffer_memory) = create_buffer(
+		device,
+		buffer_size,
+		vk::BufferUsageFlags::TRANSFER_SRC,
+		vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+		&device_memory_properties,
+	);	
+
+	unsafe {
+		let data_ptr = device
+			.map_memory(
+				staging_buffer_memory, 
+				0, 
+				buffer_size, 
+				vk::MemoryMapFlags::empty()
+			)
+			.expect("Failed to Map Memory") as *mut u32;
+
+		data_ptr.copy_from_nonoverlapping(data.as_ptr(), data.len());
+		device.unmap_memory(staging_buffer_memory);
+	}
+
+		let (index_buffer, index_buffer_memory) = create_buffer(
+			device,
+			buffer_size,
+			vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::INDEX_BUFFER,
+			vk::MemoryPropertyFlags::DEVICE_LOCAL,
+			&device_memory_properties,
+		);
+
+		copy_buffer(
+			device,
+			submit_queue,
+			command_pool,
+			staging_buffer,
+			index_buffer,
+			buffer_size,
+		);
+
+		unsafe {
+			device.destroy_buffer(staging_buffer, None);
+			device.free_memory(staging_buffer_memory, None);
+		}
+
+		(index_buffer, index_buffer_memory)
+}
+
