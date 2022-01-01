@@ -1,7 +1,6 @@
 pub mod v1;
 
 use ash::{Entry, Instance, Device, vk};
-use winapi::um::cfgmgr32::CM_DELETE_CLASS_ONLY;
 
 use std::{
 	ffi::CString, 
@@ -152,7 +151,6 @@ pub fn is_physical_device_suitable (
 	return 	is_queue_family_supported &&
 			is_device_extension_supported &&
 			is_swapchain_supported;
-
 }
 
 pub fn find_queue_family(

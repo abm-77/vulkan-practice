@@ -19,7 +19,10 @@ use cgmath::{Deg, Matrix4, Point3, Vector3};
 
 use std::{
 	ptr,
+	path::Path,
 };
+
+const TEXTURE_PATH: &'static str = "res/texture.jpg";
 
 struct App {
 	window: winit::window::Window,
@@ -50,6 +53,9 @@ struct App {
 	pipeline_layout: vk::PipelineLayout,
 	ubo_layout: vk::DescriptorSetLayout,
 	graphics_pipeline: vk::Pipeline,
+
+	texture_image: vk::Image,
+	texture_image_memory: vk::DeviceMemory,
 
 	vertex_buffer: vk::Buffer,
 	vertex_buffer_memory: vk::DeviceMemory,
@@ -133,7 +139,7 @@ impl App {
 
 		// graphics pipeline
 		let render_pass = share::v1::create_render_pass(&logical_device, swapchain_info.swapchain_format);
-		let ubo_layout = App::create_descriptor_set_layout(&logical_device);
+		let ubo_layout = share::v1::create_descriptor_set_layout(&logical_device);
 		let (graphics_pipeline, pipeline_layout) = share::v1::create_graphics_pipeline(
 			&logical_device, 
 			render_pass,
@@ -151,6 +157,14 @@ impl App {
 		// buffers
 		let command_pool = share::v1::create_command_pool(&logical_device, &family_indices);
 
+		let (texture_image, texture_memory) = App::create_texture_image(
+			&device,
+			command_pool,
+			graphics_queue,
+			&physical_device_memory_properites,
+			&Path::new(TEXTURE_PATH),
+		);
+
 		let (vertex_buffer, vertex_buffer_memory) = utility::share::v1::create_vertex_buffer(
 			&logical_device,
 			&physical_device_memory_properties,
@@ -167,14 +181,14 @@ impl App {
 			&RECT_INDICES_DATA,
 		);
 
-		let (uniform_buffers, unfiform_buffers_memory) = App::create_uniform_buffers(
+		let (uniform_buffers, unfiform_buffers_memory) = share::v1::create_uniform_buffers(
 			&logical_device,
 			&physical_device_memory_properties,
 			swapchain_info.swapchain_images.len(),
 		);
 
-		let descriptor_pool = App::create_descriptor_pool(&logical_device, swapchain_info.swapchain_images.len());
-		let descriptor_sets = App::create_descriptor_sets(
+		let descriptor_pool = share::v1::create_descriptor_pool(&logical_device, swapchain_info.swapchain_images.len());
+		let descriptor_sets = share::v1::create_descriptor_sets(
 			&logical_device,
 			descriptor_pool,
 			ubo_layout,
@@ -225,6 +239,9 @@ impl App {
 			ubo_layout: ubo_layout,
 			graphics_pipeline: graphics_pipeline,
 
+			texture_image: texture_image,
+			texture_image_memory: texture_memory,
+
 			vertex_buffer: vertex_buffer,
 			vertex_buffer_memory: vertex_buffer_memory,
 			index_buffer: index_buffer,
@@ -253,133 +270,30 @@ impl App {
 		}
 	}
 
-	fn create_descriptor_pool(
+	fn create_texture_image(
 		device: &ash::Device,
-		swapchain_images_size: usize,
-	) -> vk::DescriptorPool {
-		let pool_sizes = [vk::DescriptorPoolSize{
-			ty: vk::DescriptorType::UNIFORM_BUFFER,
-			descriptor_count: swapchain_images_size as u32,
-		}];
-
-		  let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
-            s_type: vk::StructureType::DESCRIPTOR_POOL_CREATE_INFO,
-            p_next: ptr::null(),
-            flags: vk::DescriptorPoolCreateFlags::empty(),
-            max_sets: swapchain_images_size as u32,
-            pool_size_count: pool_sizes.len() as u32,
-            p_pool_sizes: pool_sizes.as_ptr(),
-        };
-
-		unsafe {
-			device
-				.create_descriptor_pool(&descriptor_pool_create_info, None)
-				.expect("Failed to create Descriptor Pool!")
-		}
-	}
-
-	fn create_descriptor_sets(
-        device: &ash::Device,
-        descriptor_pool: vk::DescriptorPool,
-        descriptor_set_layout: vk::DescriptorSetLayout,
-        uniform_buffers: &Vec<vk::Buffer>,
-        swapchain_images_size: usize,
-    ) -> Vec<vk::DescriptorSet> {
-		let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-		for _ in 0..swapchain_images_size {
-			layouts.push(descriptor_set_layout);
-		}
-
-		let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo {
-			s_type: vk::StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-            p_next: ptr::null(),
-            descriptor_pool,
-            descriptor_set_count: swapchain_images_size as u32,
-            p_set_layouts: layouts.as_ptr(),
-		};
-
-		let descriptor_sets = unsafe {
-			device
-				.allocate_descriptor_sets(&descriptor_set_allocate_info)
-				.expect("Failed to allocate Descriptor Sets!")
-		};
-
-		for (i, &descriptor_set) in descriptor_sets.iter().enumerate() {
-			let descriptor_buffer_info = [vk::DescriptorBufferInfo {
-				buffer: uniform_buffers[i],
-				offset: 0,
-				range: std::mem::size_of::<UniformBufferObject>() as u64,
-			}];
-
-            let descriptor_write_sets = [vk::WriteDescriptorSet {
-                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: ptr::null(),
-                dst_set: descriptor_set,
-                dst_binding: 0,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                p_image_info: ptr::null(),
-                p_buffer_info: descriptor_buffer_info.as_ptr(),
-                p_texel_buffer_view: ptr::null(),
-            }];
-
-            unsafe {
-                device.update_descriptor_sets(&descriptor_write_sets, &[]);
-            }
-		}
-
-		descriptor_sets
-	}
-
-	fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLayout {
-		let ubo_layout_bindings = [vk::DescriptorSetLayoutBinding {
-			binding: 0,
-			descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-			descriptor_count: 1,
-			stage_flags: vk::ShaderStageFlags::VERTEX,
-			p_immutable_samplers: ptr::null(),
-		}];
-
-		let ubo_layout_create_info = vk::DescriptorSetLayoutCreateInfo {
-			s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-			p_next: ptr::null(),
-			flags: vk::DescriptorSetLayoutCreateFlags::empty(),
-			binding_count: ubo_layout_bindings.len() as u32,
-			p_bindings: ubo_layout_bindings.as_ptr(),
-		};
-
-		unsafe {
-			device
-				.create_descriptor_set_layout(&ubo_layout_create_info, None)
-				.expect("Failed to create Descriptor Set Layout!")
-		}
-	}
-	
-	fn create_uniform_buffers(
-		device: &ash::Device,
+		comand_pool: vk::CommandPool,
+		submit_queue: vk::Queue,
 		device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-		swapchain_image_count: usize,
-	) -> (Vec<vk::Buffer>, Vec<vk::DeviceMemory>) {
-		let buffer_size = std::mem::size_of::<UniformBufferObject>();
+		image_path: &Path,
+	) -> (vk::Image, vk::DeviceMemory) {
+		let mut image_object= image::open(image_path).unwrap();
+		image_object = image_object.flipv();
 
-		let mut uniform_buffers = vec![];
-		let mut uniform_buffers_memory = vec![];
+		let image_size = 
+			(std::mem::size_of::<u8>() as u32 * image_width * image_height * 4) as vk::DeviceSize;
+		
+		let image_data = match &image_object {
+			image::DynamicImage::ImageLuma8(_) |
+			image::DynamicImage::ImageBgr8(_) |
+			image::DynamicImage::ImageRgb8(_) => image_object.to_rgba().into_raw(),
 
-		for _ in 0..swapchain_image_count {
-			let (uniform_buffer, uniform_buffer_memory) = share::create_buffer(
-				device,
-				buffer_size as u64,
-				vk::BufferUsageFlags::UNIFORM_BUFFER,
-				vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-				device_memory_properties,
-			);
+			image::DynamicImage::ImageLumaA8(_) |
+			image::DynamicImage::ImageBgra8(_) |
+			image::DynamicImage::ImageRgba8(_) => image_object.raw_pixels(),
 
-			uniform_buffers.push(uniform_buffer);
-			uniform_buffers_memory.push(uniform_buffer_memory);
-		}
-
-		(uniform_buffers, uniform_buffers_memory)
+			_ => (),
+		};
 	}
 
 	fn update_uniform_buffer(&mut self, current_image: usize, delta_time: f32) {
@@ -607,7 +521,7 @@ impl VulkanApp for App {
 			self.instance.get_physical_device_memory_properties(self.physical_device)
 		};
 
-		let (uniform_buffers, uniform_buffers_memory) = App::create_uniform_buffers(
+		let (uniform_buffers, uniform_buffers_memory) = share::v1::create_uniform_buffers(
 			&self.device, 
 			&mem_props,
 			self.swapchain_images.len()
@@ -615,8 +529,8 @@ impl VulkanApp for App {
 		self.uniform_buffers = uniform_buffers;
 		self.uniform_buffers_memory = uniform_buffers_memory;
 
-		self.descriptor_pool = App::create_descriptor_pool(&self.device, self.swapchain_images.len());
-		self.descriptor_sets = App::create_descriptor_sets(
+		self.descriptor_pool = share::v1::create_descriptor_pool(&self.device, self.swapchain_images.len());
+		self.descriptor_sets = share::v1::create_descriptor_sets(
 			&self.device,
 			self.descriptor_pool,
 			self.ubo_layout,

@@ -1,5 +1,6 @@
 use ash::vk;
 use ash::{Entry, Instance};
+use std::ffi::CString;
 
 #[cfg(target_os = "windows")]
 use ash::extensions::khr::Win32Surface;
