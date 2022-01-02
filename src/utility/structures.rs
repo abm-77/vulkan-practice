@@ -58,6 +58,7 @@ pub struct SyncObjects {
 pub struct Vertex {
 	pub pos: [f32; 3],
 	pub color: [f32; 4],
+	pub tex_coord: [f32; 2],
 }
 
 impl Vertex {
@@ -69,20 +70,26 @@ impl Vertex {
 		}]
 	}
 
-	pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 2] {
+	pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 3] {
 		[
-		vk::VertexInputAttributeDescription {
-			binding: 0,
-			location: 0,
-			format: vk::Format::R32G32B32_SFLOAT,
-			offset: 0,
-		},
-		vk::VertexInputAttributeDescription {
-			binding: 0,
-			location: 1,
-			format: vk::Format::R32G32B32A32_SFLOAT,
-			offset: std::mem::size_of::<[f32; 3]>() as u32,
-		},
+			vk::VertexInputAttributeDescription {
+				binding: 0,
+				location: 0,
+				format: vk::Format::R32G32B32_SFLOAT,
+				offset: 0,
+			},
+			vk::VertexInputAttributeDescription {
+				binding: 0,
+				location: 1,
+				format: vk::Format::R32G32B32A32_SFLOAT,
+				offset: std::mem::size_of::<[f32; 3]>() as u32,
+			},
+			vk::VertexInputAttributeDescription {
+				binding: 0,
+				location: 2,
+				format: vk::Format::R32G32_SFLOAT,
+				offset: std::mem::size_of::<[f32; 7]>() as u32,
+			},
 		]
 	}
 }
@@ -97,20 +104,24 @@ pub struct UniformBufferObject {
 
 pub const RECT_VERTICES_DATA: [Vertex; 4] = [
     Vertex {
-        pos: [-0.5, -0.5, 0.0],
-        color: [1.0, 0.0, 0.0, 1.0],
-    },
-    Vertex {
-        pos: [0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0, 1.0],
-    },
-    Vertex {
-        pos: [0.5, 0.5, 0.0],
-        color: [0.0, 0.0, 1.0, 1.0],
-    },
-    Vertex {
-        pos: [-0.5, 0.5, 0.0],
+        pos: [-0.75, -0.75, 0.0],
         color: [1.0, 1.0, 1.0, 1.0],
+        tex_coord: [1.0, 0.0],
+    },
+    Vertex {
+        pos: [0.75, -0.75, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        tex_coord: [0.0, 0.0],
+    },
+    Vertex {
+        pos: [0.75, 0.75, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        tex_coord: [0.0, 1.0],
+    },
+    Vertex {
+        pos: [-0.75, 0.75, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        tex_coord: [1.0, 1.0],
     },
 ];
 pub const RECT_INDICES_DATA: [u32; 6] = [0, 1, 2, 2, 3, 0];

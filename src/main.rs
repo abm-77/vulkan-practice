@@ -8,21 +8,18 @@ use vulkan_tutorial::{
 	}
 };
 
-use winit::{
-    event::{Event, WindowEvent, KeyboardInput, VirtualKeyCode, ElementState},
-    event_loop::{ControlFlow, EventLoop},
-};
 
-use ash::{vk, util};
+use ash::vk;
 
-use cgmath::{Deg, Matrix4, Point3, Vector3};
+use cgmath::{Deg, Matrix4, Vector3};
 
 use std::{
 	ptr,
 	path::Path,
 };
 
-const TEXTURE_PATH: &'static str = "res/texture.jpg";
+
+const TEXTURE_PATH: &'static str = "textures/texture.jpg";
 
 struct App {
 	window: winit::window::Window,
@@ -56,6 +53,8 @@ struct App {
 
 	texture_image: vk::Image,
 	texture_image_memory: vk::DeviceMemory,
+	texture_sampler: vk::Sampler,
+	texture_image_view: vk::ImageView,
 
 	vertex_buffer: vk::Buffer,
 	vertex_buffer_memory: vk::DeviceMemory,
@@ -131,7 +130,7 @@ impl App {
 			&family_indices,
 		);
 
-		let swapchain_imageviews = share::create_image_views(
+		let swapchain_imageviews = share::v1::create_image_views(
 			&logical_device,
 			swapchain_info.swapchain_format,
 			&swapchain_info.swapchain_images,
@@ -157,13 +156,16 @@ impl App {
 		// buffers
 		let command_pool = share::v1::create_command_pool(&logical_device, &family_indices);
 
-		let (texture_image, texture_memory) = App::create_texture_image(
-			&device,
+		let (texture_image, texture_memory) = share::v1::create_texture_image(
+			&logical_device,
 			command_pool,
 			graphics_queue,
-			&physical_device_memory_properites,
+			&physical_device_memory_properties,
 			&Path::new(TEXTURE_PATH),
 		);
+
+		let texture_image_view = share::v1::create_texture_image_view(&logical_device, texture_image, 1);
+		let texture_sampler = share::v1::create_texture_sampler(&logical_device);
 
 		let (vertex_buffer, vertex_buffer_memory) = utility::share::v1::create_vertex_buffer(
 			&logical_device,
@@ -193,6 +195,8 @@ impl App {
 			descriptor_pool,
 			ubo_layout,
 			&uniform_buffers,
+			texture_image_view,
+			texture_sampler,
 			swapchain_info.swapchain_images.len(),
 		);
 
@@ -240,6 +244,8 @@ impl App {
 			graphics_pipeline: graphics_pipeline,
 
 			texture_image: texture_image,
+			texture_image_view: texture_image_view,
+			texture_sampler: texture_sampler,
 			texture_image_memory: texture_memory,
 
 			vertex_buffer: vertex_buffer,
@@ -268,32 +274,6 @@ impl App {
 
 			is_frame_buffer_resized: false,
 		}
-	}
-
-	fn create_texture_image(
-		device: &ash::Device,
-		comand_pool: vk::CommandPool,
-		submit_queue: vk::Queue,
-		device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
-		image_path: &Path,
-	) -> (vk::Image, vk::DeviceMemory) {
-		let mut image_object= image::open(image_path).unwrap();
-		image_object = image_object.flipv();
-
-		let image_size = 
-			(std::mem::size_of::<u8>() as u32 * image_width * image_height * 4) as vk::DeviceSize;
-		
-		let image_data = match &image_object {
-			image::DynamicImage::ImageLuma8(_) |
-			image::DynamicImage::ImageBgr8(_) |
-			image::DynamicImage::ImageRgb8(_) => image_object.to_rgba().into_raw(),
-
-			image::DynamicImage::ImageLumaA8(_) |
-			image::DynamicImage::ImageBgra8(_) |
-			image::DynamicImage::ImageRgba8(_) => image_object.raw_pixels(),
-
-			_ => (),
-		};
 	}
 
 	fn update_uniform_buffer(&mut self, current_image: usize, delta_time: f32) {
@@ -329,6 +309,9 @@ impl Drop for App {
 		unsafe {
 			self.cleanup_swapchain();
 
+			self.device.destroy_image(self.texture_image, None);
+			self.device.free_memory(self.texture_image_memory, None);
+
 			self.device.destroy_descriptor_set_layout(self.ubo_layout, None);
 
 			for i in 0..MAX_FRAMES_IN_FLIGHT {
@@ -345,6 +328,9 @@ impl Drop for App {
 
 			self.device.destroy_buffer(self.index_buffer, None);
 			self.device.free_memory(self.index_buffer_memory, None);
+
+			self.device.destroy_sampler(self.texture_sampler, None);
+			self.device.destroy_image_view(self.texture_image_view, None);
 			
 			self.device.destroy_command_pool(self.command_pool, None);
 
@@ -495,7 +481,7 @@ impl VulkanApp for App {
 		self.swapchain_format = swapchain_info.swapchain_format;
 		self.swapchain_extent = swapchain_info.swapchain_extent;
 
-		self.swapchain_imageviews = share::create_image_views(
+		self.swapchain_imageviews = share::v1::create_image_views(
 			&self.device,
 			self.swapchain_format,
 			&self.swapchain_images,
@@ -535,6 +521,8 @@ impl VulkanApp for App {
 			self.descriptor_pool,
 			self.ubo_layout,
 			&self.uniform_buffers,
+			self.texture_image_view,
+			self.texture_sampler,
 			self.swapchain_images.len()
 		);
 

@@ -1,5 +1,8 @@
 use ash::vk::{self};
 
+use image::{GenericImageView, EncodableLayout};
+
+use super::*;
 
 use std::{
 	cmp::max,
@@ -8,7 +11,6 @@ use std::{
 	ptr, mem::swap,
 };
 
-use super::*;
 
 pub fn create_render_pass(
 	device: &ash::Device,
@@ -81,9 +83,9 @@ pub fn create_graphics_pipeline(
 	ubo_set_layout: vk::DescriptorSetLayout,
 )  -> (vk::Pipeline, vk::PipelineLayout) {
 	let vert_shader_code =
-		tools::read_shader_code(Path::new("shaders/spv/shader-uniform-buffer.vert.spv"));
+		tools::read_shader_code(Path::new("shaders/spv/shader-texture.vert.spv"));
 	let frag_shader_code =
-		tools::read_shader_code(Path::new("shaders/spv/shader-uniform-buffer.frag.spv"));
+		tools::read_shader_code(Path::new("shaders/spv/shader-texture.frag.spv"));
 
 	let vert_shader_module = create_shader_module(device, vert_shader_code);
 	let frag_shader_module = create_shader_module(device, frag_shader_code);
@@ -606,12 +608,20 @@ pub fn create_descriptor_pool(
 	device: &ash::Device,
 	swapchain_images_size: usize,
 ) -> vk::DescriptorPool {
-	let pool_sizes = [vk::DescriptorPoolSize{
-		ty: vk::DescriptorType::UNIFORM_BUFFER,
-		descriptor_count: swapchain_images_size as u32,
-	}];
+	let pool_sizes = [
+		vk::DescriptorPoolSize {
+			// transform descriptor pool
+			ty: vk::DescriptorType::UNIFORM_BUFFER,
+			descriptor_count: swapchain_images_size as u32,
+		},
+		vk::DescriptorPoolSize {
+			// sampler descriptor pool
+			ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+			descriptor_count: swapchain_images_size as u32,
+		},
+	];
 
-		let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
+	let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
 		s_type: vk::StructureType::DESCRIPTOR_POOL_CREATE_INFO,
 		p_next: ptr::null(),
 		flags: vk::DescriptorPoolCreateFlags::empty(),
@@ -632,6 +642,8 @@ pub fn create_descriptor_sets(
 	descriptor_pool: vk::DescriptorPool,
 	descriptor_set_layout: vk::DescriptorSetLayout,
 	uniform_buffers: &Vec<vk::Buffer>,
+	texture_image_view: vk::ImageView,
+	texture_sampler: vk::Sampler,
 	swapchain_images_size: usize,
 ) -> Vec<vk::DescriptorSet> {
 	let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
@@ -642,7 +654,7 @@ pub fn create_descriptor_sets(
 	let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo {
 		s_type: vk::StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
 		p_next: ptr::null(),
-		descriptor_pool,
+		descriptor_pool: descriptor_pool,
 		descriptor_set_count: swapchain_images_size as u32,
 		p_set_layouts: layouts.as_ptr(),
 	};
@@ -660,18 +672,41 @@ pub fn create_descriptor_sets(
 			range: std::mem::size_of::<UniformBufferObject>() as u64,
 		}];
 
-		let descriptor_write_sets = [vk::WriteDescriptorSet {
-			s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
-			p_next: ptr::null(),
-			dst_set: descriptor_set,
-			dst_binding: 0,
-			dst_array_element: 0,
-			descriptor_count: 1,
-			descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-			p_image_info: ptr::null(),
-			p_buffer_info: descriptor_buffer_info.as_ptr(),
-			p_texel_buffer_view: ptr::null(),
+		let descriptor_image_infos = [vk::DescriptorImageInfo {
+			sampler: texture_sampler,
+			image_view: texture_image_view,
+			image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
 		}];
+
+		let descriptor_write_sets = [
+			// transform uniform
+			vk::WriteDescriptorSet {
+				s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+				p_next: ptr::null(),
+				dst_set: descriptor_set,
+				dst_binding: 0,
+				dst_array_element: 0,
+				descriptor_count: 1,
+				descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+				p_image_info: ptr::null(),
+				p_buffer_info: descriptor_buffer_info.as_ptr(),
+				p_texel_buffer_view: ptr::null(),
+			},
+
+			// sampler uniform
+			vk::WriteDescriptorSet {
+				s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+				p_next: ptr::null(),
+				dst_set: descriptor_set,
+				dst_binding: 1,
+				dst_array_element: 0,
+				descriptor_count: 1,
+				descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+				p_image_info: descriptor_image_infos.as_ptr(),
+				p_buffer_info: ptr::null(),
+				p_texel_buffer_view: ptr::null(),
+			}
+		];
 
 		unsafe {
 			device.update_descriptor_sets(&descriptor_write_sets, &[]);
@@ -682,13 +717,22 @@ pub fn create_descriptor_sets(
 }
 
 pub fn create_descriptor_set_layout(device: &ash::Device) -> vk::DescriptorSetLayout {
-	let ubo_layout_bindings = [vk::DescriptorSetLayoutBinding {
-		binding: 0,
-		descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-		descriptor_count: 1,
-		stage_flags: vk::ShaderStageFlags::VERTEX,
-		p_immutable_samplers: ptr::null(),
-	}];
+	let ubo_layout_bindings = [
+		vk::DescriptorSetLayoutBinding {
+			binding: 0,
+			descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+			descriptor_count: 1,
+			stage_flags: vk::ShaderStageFlags::VERTEX,
+			p_immutable_samplers: ptr::null(),
+		},
+		vk::DescriptorSetLayoutBinding {
+			binding: 1,
+			descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+			descriptor_count: 1,
+			stage_flags: vk::ShaderStageFlags::FRAGMENT,
+			p_immutable_samplers: ptr::null(),
+		},
+	];
 
 	let ubo_layout_create_info = vk::DescriptorSetLayoutCreateInfo {
 		s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -716,7 +760,7 @@ pub fn create_uniform_buffers(
 	let mut uniform_buffers_memory = vec![];
 
 	for _ in 0..swapchain_image_count {
-		let (uniform_buffer, uniform_buffer_memory) = share::create_buffer(
+		let (uniform_buffer, uniform_buffer_memory) = create_buffer(
 			device,
 			buffer_size as u64,
 			vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -729,4 +773,351 @@ pub fn create_uniform_buffers(
 	}
 
 	(uniform_buffers, uniform_buffers_memory)
+}
+
+pub fn create_image(
+	device: &ash::Device,
+	width: u32,
+	height: u32,
+	mip_levels: u32,
+	num_samples: vk::SampleCountFlags,
+	format: vk::Format,
+	tiling: vk::ImageTiling,
+	usage: vk::ImageUsageFlags,
+	required_memory_properties: vk::MemoryPropertyFlags,
+	device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+) -> (vk::Image, vk::DeviceMemory) {
+	let image_create_info = vk::ImageCreateInfo {
+		s_type: vk::StructureType::IMAGE_CREATE_INFO,
+		p_next: ptr::null(),
+		flags: vk::ImageCreateFlags::empty(),
+		image_type: vk::ImageType::TYPE_2D,
+		format: format,
+		extent: vk::Extent3D { 
+			width,
+			height, 
+			depth: 1
+		},
+		mip_levels: mip_levels,
+		array_layers: 1,
+		samples: num_samples,
+		tiling: tiling,
+		usage: usage,
+		sharing_mode: vk::SharingMode::EXCLUSIVE,
+		queue_family_index_count: 0,
+		p_queue_family_indices: ptr::null(),
+		initial_layout: vk::ImageLayout::UNDEFINED,
+	};
+
+	let texture_image = unsafe {
+		device
+			.create_image(&image_create_info, None)
+			.expect("Failed to create Texture Image")
+	};
+
+	let image_memory_requirements =
+		unsafe { device.get_image_memory_requirements(texture_image) };
+
+	let memory_allocate_info = vk::MemoryAllocateInfo {
+		s_type: vk::StructureType::MEMORY_ALLOCATE_INFO,
+		p_next: ptr::null(),
+		allocation_size: image_memory_requirements.size,
+		memory_type_index: find_memory_type(
+				image_memory_requirements.memory_type_bits,
+				required_memory_properties,
+				device_memory_properties,
+		),
+	};
+
+	let texture_image_memory = unsafe {
+		device
+			.allocate_memory(&memory_allocate_info, None)
+			.expect("Failed to allocate Texture Image memory!")
+	};
+
+	unsafe {
+		device
+			.bind_image_memory(texture_image, texture_image_memory, 0)
+			.expect("Failed to bind Image Memory!")
+	}
+
+	(texture_image, texture_image_memory)
+}
+
+pub fn transition_image_layout(
+	device: &ash::Device,
+	command_pool: vk::CommandPool,
+	submit_queue: vk::Queue,
+	image: vk::Image,
+	_format: vk::Format,
+	old_layout: vk::ImageLayout,
+	new_layout: vk::ImageLayout,
+	mip_levels: u32,
+) {
+	let command_buffer = begin_single_time_command(device, command_pool);
+
+	let src_access_mask;
+	let dst_access_mask;
+	let source_stage;
+	let destination_stage;
+
+	if 	old_layout == vk::ImageLayout::UNDEFINED &&
+		new_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL {
+		src_access_mask = vk::AccessFlags::empty();
+		dst_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+		source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+		destination_stage = vk::PipelineStageFlags::TRANSFER;
+	} 
+	else if old_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL &&
+			new_layout == vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL {
+		src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+		dst_access_mask = vk::AccessFlags::SHADER_READ;
+		source_stage = vk::PipelineStageFlags::TRANSFER;
+		destination_stage = vk::PipelineStageFlags::FRAGMENT_SHADER;
+	}
+	else {
+		panic!("Unsupported layout transtion")
+	}
+
+
+	let image_barriers = [vk::ImageMemoryBarrier {
+		s_type: vk::StructureType::IMAGE_MEMORY_BARRIER,
+		p_next: ptr::null(),
+		src_access_mask: src_access_mask,
+		dst_access_mask: dst_access_mask,
+		old_layout: old_layout,
+		new_layout: new_layout,
+		src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+		dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+		image: image,
+		subresource_range: vk::ImageSubresourceRange {
+			aspect_mask: vk::ImageAspectFlags::COLOR,
+			base_mip_level: 0,
+			level_count: mip_levels,
+			base_array_layer: 0,
+			layer_count: 1,
+		},
+	}];
+
+	unsafe {
+		device.cmd_pipeline_barrier(
+			command_buffer,
+			source_stage,
+			destination_stage,
+			vk::DependencyFlags::empty(),
+			&[],
+			&[],
+			&image_barriers,
+		);
+	}
+
+	end_single_time_command(device, command_pool, submit_queue, command_buffer);
+}
+
+pub fn create_texture_sampler(device: &ash::Device) -> vk::Sampler {
+	let sampler_create_info = vk::SamplerCreateInfo {
+		s_type: vk::StructureType::SAMPLER_CREATE_INFO,
+		p_next: ptr::null(),
+		flags: vk::SamplerCreateFlags::empty(),
+		mag_filter: vk::Filter::LINEAR,
+		min_filter: vk::Filter::LINEAR,
+		mipmap_mode: vk::SamplerMipmapMode::LINEAR,
+		address_mode_u: vk::SamplerAddressMode::REPEAT,
+		address_mode_v: vk::SamplerAddressMode::REPEAT,
+		address_mode_w: vk::SamplerAddressMode::REPEAT,
+		mip_lod_bias: 0.0,
+		anisotropy_enable: vk::TRUE,
+		max_anisotropy: 16.0,
+		compare_enable: vk::FALSE,
+		compare_op: vk::CompareOp::ALWAYS,
+		min_lod: 0.0,
+		max_lod: 0.0,
+		border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+		unnormalized_coordinates: vk::FALSE,
+	};
+
+	unsafe {
+		device
+			.create_sampler(&sampler_create_info, None)
+			.expect("Failed to create Sampler!")
+	}
+}
+pub fn create_image_view(
+	device: &ash::Device,
+	image: vk::Image,
+	surface_format: vk::Format,
+	aspect_flags: vk::ImageAspectFlags,
+	mip_levels: u32,
+) -> vk::ImageView {
+	let imageview_create_info = vk::ImageViewCreateInfo {
+		s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
+		p_next: ptr::null(),
+		flags: vk::ImageViewCreateFlags::empty(),
+		view_type: vk::ImageViewType::TYPE_2D,
+		format: surface_format,
+		components: vk::ComponentMapping {
+			r: vk::ComponentSwizzle::IDENTITY,
+			g: vk::ComponentSwizzle::IDENTITY,
+			b: vk::ComponentSwizzle::IDENTITY,
+			a: vk::ComponentSwizzle::IDENTITY,
+		},
+		subresource_range: vk::ImageSubresourceRange {
+			aspect_mask: aspect_flags,
+			base_mip_level: 0,
+			level_count: mip_levels,
+			base_array_layer: 0,
+			layer_count: 1,
+		},
+		image: image,
+	};
+
+	let image_view = unsafe {
+		device
+			.create_image_view(&imageview_create_info, None)
+			.expect("Failed to create Image View!")
+	};
+
+	image_view
+}
+
+pub fn create_texture_image_view(
+	device: &ash::Device, 
+	texture_image: vk::Image,
+	mip_levels: u32,
+) -> vk::ImageView {
+	create_image_view(
+		device, 
+		texture_image, 
+		vk::Format::R8G8B8A8_SRGB, 
+		vk::ImageAspectFlags::COLOR, 
+		mip_levels,		
+	)
+}
+
+pub fn create_image_views(
+	device: &ash::Device,
+	surface_format: vk::Format,
+	images: &Vec<vk::Image>
+) -> Vec<vk::ImageView> {
+	let swapchain_image_views: Vec<vk::ImageView> = images
+		.iter()
+		.map(|&image| {
+			create_image_view(
+				device,
+				image,
+				surface_format,
+				vk::ImageAspectFlags::COLOR,
+				1,
+			)
+		})
+		.collect();
+
+	swapchain_image_views
+}
+
+pub fn create_texture_image(
+	device: &ash::Device,
+	command_pool: vk::CommandPool,
+	submit_queue: vk::Queue,
+	device_memory_properties: &vk::PhysicalDeviceMemoryProperties,
+	image_path: &Path,
+) -> (vk::Image, vk::DeviceMemory) {
+	let mut image_object= image::open(image_path).unwrap();
+	image_object = image_object.flipv();
+
+	let (image_width, image_height) = (image_object.width(), image_object.height());
+
+	let image_size = 
+		(std::mem::size_of::<u8>() as u32 * image_width * image_height * 4) as vk::DeviceSize;
+
+	let image_data = match &image_object {
+		image::DynamicImage::ImageLuma8(_) |
+		image::DynamicImage::ImageBgr8(_) |
+		image::DynamicImage::ImageRgb8(_) => image_object.to_rgba8().into_raw(),
+
+		image::DynamicImage::ImageLumaA8(_) |
+		image::DynamicImage::ImageBgra8(_) |
+		image::DynamicImage::ImageRgba8(_) => image_object.to_bytes(),
+
+		_ => vec![],
+	};
+
+	if image_size <= 0 {
+		panic!("Failed to load texture image!");
+	}
+
+	let (staging_buffer, staging_buffer_memory) = create_buffer(
+		device,
+		image_size,
+		vk::BufferUsageFlags::TRANSFER_SRC,
+		vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+		device_memory_properties,
+	);
+
+	unsafe {
+		let data_ptr = device
+			.map_memory(
+				staging_buffer_memory, 
+				0, 
+				image_size, 
+				vk::MemoryMapFlags::empty()
+			)
+			.expect("Failed to map memory!") as *mut u8;
+
+			data_ptr.copy_from_nonoverlapping(image_data.as_ptr(), image_data.len());
+
+			device.unmap_memory(staging_buffer_memory);
+	}
+
+	let (texture_image, texture_image_memory) = create_image(
+		device,
+		image_width,
+		image_height,
+		1,
+		vk::SampleCountFlags::TYPE_1,
+		vk::Format::R8G8B8A8_SRGB,
+		vk::ImageTiling::OPTIMAL,
+		vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+		vk::MemoryPropertyFlags::DEVICE_LOCAL,
+		device_memory_properties,	
+	);
+
+	transition_image_layout(
+		device,
+		command_pool,
+		submit_queue,
+		texture_image,
+		vk::Format::R8G8B8A8_SRGB,
+		vk::ImageLayout::UNDEFINED,
+		vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+		1,
+	);
+
+	copy_buffer_to_image(
+		device,
+		command_pool,
+		submit_queue,
+		staging_buffer,
+		texture_image,
+		image_width,
+		image_height,
+	);
+
+	transition_image_layout(
+		device,
+		command_pool,
+		submit_queue,
+		texture_image,
+		vk::Format::R8G8B8A8_UNORM,
+		vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+		vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+		1,
+	);
+
+	unsafe {
+		device.destroy_buffer(staging_buffer, None);
+		device.free_memory(staging_buffer_memory, None);
+	}
+
+	(texture_image, texture_image_memory)
 }
